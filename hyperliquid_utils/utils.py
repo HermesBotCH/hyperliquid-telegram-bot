@@ -255,27 +255,29 @@ class HyperliquidUtils:
 
     def get_coins_by_traded_volume(self) -> List[str]:
         """Get coins available for trading across all DEXes, sorted by volume."""
-        # Default DEX coins
+        # Default DEX coins — take top 40 by volume
         response_data: Any = self.info.meta_and_asset_ctxs()
         universe: List[Dict[str, Any]] = response_data[0]['universe']
         coin_data: List[Dict[str, Any]] = response_data[1]
-        coins: list[tuple[str, float]] = [(u["name"], float(c["dayNtlVlm"])) for u, c in zip(universe, coin_data)]
+        default_coins: list[tuple[str, float]] = [(u["name"], float(c["dayNtlVlm"])) for u, c in zip(universe, coin_data)]
+        sorted_default = sorted(default_coins, key=lambda x: x[1], reverse=True)[:40]
 
-        # Extra DEX coins — meta() supports dex, meta_and_asset_ctxs() does not
+        # Extra DEX coins — include ALL so every XYZ token is selectable
+        extra_coins: list[tuple[str, float]] = []
         for dex in self._extra_dexes:
             try:
                 dex_meta = self.info.meta(dex=dex)
                 dex_mids = self.info.all_mids(dex=dex)
                 for asset_info in dex_meta.get("universe", []):
                     coin = asset_info["name"]
-                    # Use mid price as a rough volume proxy for ordering
                     mid = float(dex_mids.get(coin, 0))
-                    coins.append((coin, mid))
+                    extra_coins.append((coin, mid))
             except Exception as e:
                 logger.warning(f"Failed to fetch coins for DEX '{dex}': {e}")
 
-        sorted_coins = sorted(coins, key=lambda x: x[1], reverse=True)
-        return [coin[0] for coin in reversed(sorted_coins[:75])]
+        # Merge — default coins first (sorted by volume), then extra DEX coins
+        merged = sorted_default + extra_coins
+        return [coin[0] for coin in merged]
 
     def extra_dexes(self) -> List[str]:
         """Return the list of extra perp DEX names to query (e.g. ['xyz'])."""
