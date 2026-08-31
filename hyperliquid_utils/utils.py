@@ -293,29 +293,39 @@ class HyperliquidUtils:
         return list(self._extra_dexes)
 
     def get_coins_by_traded_volume(self, dex: str = "") -> List[str]:
-        """Get coins available for trading on a specific perp DEX, sorted by volume.
+        """Get coins available for trading on a specific perp DEX, ranked by volume.
+
+        Both the default DEX and builder DEXes (e.g. ``xyz``, ``flx``) are ranked
+        by 24h notional volume, contributing the same UX.  The list is capped at
+        ``HTB_MAX_COINS`` (default 25) so the Telegram picker stays short instead
+        of forcing long scrolling (the default DEX previously used a hardcoded
+        top-40; extra DEXes returned every coin, e.g. ~117 on xyz).
+
+        Coins with an open position are always appended so they stay reachable
+        even if they fall below the volume cap — the caller prioritizes them to
+        the bottom of the picker, matching the "find my coin down there" feel.
 
         Args:
             dex: DEX name ('' for default, 'xyz', 'flx', etc.).
         """
-        if dex:
-            # Extra DEX — sorted by mid price descending
-            dex_meta = self.info.meta(dex=dex)
-            dex_mids = self.info.all_mids(dex=dex)
-            coins = sorted(
-                dex_meta.get("universe", []),
-                key=lambda a: float(dex_mids.get(a["name"], 0)),
-                reverse=True,
-            )
-            return [a["name"] for a in coins]
+        ctxs: Any = self.info.meta_and_asset_ctxs(dex=dex)
+        universe: List[Dict[str, Any]] = ctxs[0]['universe']
+        coin_data: List[Dict[str, Any]] = ctxs[1]
+        coins: list[tuple[str, float]] = [
+            (u["name"], float(c.get("dayNtlVlm", 0)))
+            for u, c in zip(universe, coin_data)
+        ]
+        max_coins = int(os.environ.get("HTB_MAX_COINS", "25"))
+        ranked = [c[0] for c in sorted(coins, key=lambda x: x[1], reverse=True)[:max_coins]]
 
-        # Default DEX — top 40 by 24h volume
-        response_data: Any = self.info.meta_and_asset_ctxs()
-        universe: List[Dict[str, Any]] = response_data[0]['universe']
-        coin_data: List[Dict[str, Any]] = response_data[1]
-        coins: list[tuple[str, float]] = [(u["name"], float(c["dayNtlVlm"])) for u, c in zip(universe, coin_data)]
-        sorted_coins = sorted(coins, key=lambda x: x[1], reverse=True)[:40]
-        return [c[0] for c in sorted_coins]
+        # Always keep coins with open positions in the list so the user can find
+        # them again even when their volume dropped below the cap.
+        prefix = f"{dex}:" if dex else ""
+        for coin in self.get_coins_with_open_positions():
+            if (prefix and coin.startswith(prefix)) or (not prefix and ":" not in coin):
+                if coin not in ranked:
+                    ranked.append(coin)
+        return ranked
 
     def get_dex_reply_markup(self) -> InlineKeyboardMarkup:
         """Build a keyboard to let the user pick which perp DEX to trade on."""

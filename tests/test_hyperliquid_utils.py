@@ -267,8 +267,50 @@ class TestHyperliquidUtilsCoins:
             instance = HyperliquidUtils()
             instance._extra_dexes = []
             instance.info.meta_and_asset_ctxs = MagicMock(return_value=mock_response)  # type: ignore[attr-defined]
+            instance.get_coins_with_open_positions = MagicMock(return_value=[])  # type: ignore[method-assign]
             result = instance.get_coins_by_traded_volume()
             assert result == ["ETH", "SOL", "BTC"]
+
+    def test_get_coins_by_traded_volume_extra_dex_cap_and_open_positions(self):
+        """Builder-DEX coins rank by volume, are capped, and held coins stay listed.
+
+        With HTB_MAX_COINS=2 and an xyz open position that would fall outside the
+        top-2, the held coin must still be returned so it surfaces in the picker.
+        """
+        xyz_ctxs = (
+            {"universe": [{"name": f"xyz:C{i}"} for i in range(10)]},
+            [{"dayNtlVlm": str(1000 - i)} for i in range(10)],
+        )
+        with patch('hyperliquid_utils.utils.InfoProxy') as mock_info_proxy, \
+                patch('hyperliquid_utils.utils.Info') as mock_info, \
+                patch.dict(os.environ, {"HTB_MAX_COINS": "2"}, clear=False):
+            from hyperliquid_utils.utils import HyperliquidUtils
+            instance = HyperliquidUtils()
+            instance._extra_dexes = []
+            instance.info.meta_and_asset_ctxs = MagicMock(return_value=xyz_ctxs)  # type: ignore[attr-defined]
+            # held coin xyz:C9 has the lowest volume -> below the top-2 cap
+            instance.get_coins_with_open_positions = MagicMock(return_value=["xyz:C9"])  # type: ignore[method-assign]
+            result = instance.get_coins_by_traded_volume(dex="xyz")
+            assert result == ["xyz:C0", "xyz:C1", "xyz:C9"]
+            instance.info.meta_and_asset_ctxs.assert_called_with(dex="xyz")
+
+    def test_get_coins_by_traded_volume_cap_respected(self):
+        """Without an open position, the list is capped at HTB_MAX_COINS."""
+        xyz_ctxs = (
+            {"universe": [{"name": f"xyz:C{i}"} for i in range(10)]},
+            [{"dayNtlVlm": str(1000 - i)} for i in range(10)],
+        )
+        with patch('hyperliquid_utils.utils.InfoProxy') as mock_info_proxy, \
+                patch('hyperliquid_utils.utils.Info') as mock_info, \
+                patch.dict(os.environ, {"HTB_MAX_COINS": "5"}, clear=False):
+            from hyperliquid_utils.utils import HyperliquidUtils
+            instance = HyperliquidUtils()
+            instance._extra_dexes = []
+            instance.info.meta_and_asset_ctxs = MagicMock(return_value=xyz_ctxs)  # type: ignore[attr-defined]
+            instance.get_coins_with_open_positions = MagicMock(return_value=[])  # type: ignore[method-assign]
+            result = instance.get_coins_by_traded_volume(dex="xyz")
+            assert result == ["xyz:C0", "xyz:C1", "xyz:C2", "xyz:C3", "xyz:C4"]
+            assert len(result) == 5
 
     def test_get_coins_reply_markup(self):
         with patch('hyperliquid_utils.utils.InfoProxy') as mock_info_proxy, \

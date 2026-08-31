@@ -26,6 +26,22 @@ class InfoProxy:
     def __init__(self, info: Info) -> None:
         self._info = info
 
+    def meta_and_asset_ctxs(self, dex: str = "") -> Any:
+        """Fetch perp meta + asset ctxs for a DEX.
+
+        The underlying SDK's ``meta_and_asset_ctxs()`` never forwards a ``dex``
+        argument (it only posts ``{"type": "metaAndAssetCtxs"}``), so passing one
+        always raised a ``TypeError`` for builder DEXes (e.g. ``xyz``). The
+        exchange API *does* accept ``dex`` here, so for non-default DEXes we
+        post the DEX directly. Both paths are rate-limited identically.
+        """
+        if not dex:
+            result = self._info.meta_and_asset_ctxs()
+        else:
+            result = self._info.post("/info", {"type": "metaAndAssetCtxs", "dex": dex})
+        hyperliquid_rate_limiter.add_weight(self.WEIGHTS['meta_and_asset_ctxs'])
+        return result
+
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._info, name)
         if callable(attr):
